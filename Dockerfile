@@ -5,9 +5,14 @@ RUN apk add --no-cache git python3 make g++
 
 WORKDIR /build
 
-# 克隆并构建 2024 主题
-RUN git clone --depth 1 https://github.com/vastsa/FileCodeBoxFronted.git /build/fronted-2024 && \
-    cd /build/fronted-2024 && \
+# 克隆 2024 主题源码
+RUN git clone --depth 1 https://github.com/vastsa/FileCodeBoxFronted.git /build/fronted-2024
+
+# 复制前端补丁文件（在构建前覆盖源码）
+COPY patches/frontend/ /build/fronted-2024/src/
+
+# 构建 2024 主题
+RUN cd /build/fronted-2024 && \
     npm install && \
     npm run build
 
