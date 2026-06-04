@@ -22,7 +22,6 @@ async def delete_expire_files():
         try:
             await refresh_settings()
             file_storage: FileStorageInterface = storages[settings.file_storage]()
-            # 遍历 share目录下的所有文件夹，删除空的文件夹，并判断父目录是否为空，如果为空也删除
             if settings.file_storage == "local":
                 for root, dirs, files in os.walk(f"{data_root}/share/data"):
                     if not dirs and not files:
@@ -33,8 +32,10 @@ async def delete_expire_files():
                 Q(expired_at__lt=await get_now()) | Q(expired_count=0)
             ).all()
             for exp in expire_data:
+                storage_type = exp.storage_type or settings.file_storage
+                exp_storage: FileStorageInterface = storages[storage_type]()
                 try:
-                    await file_storage.delete_file(exp)
+                    await exp_storage.delete_file(exp)
                 except Exception as e:
                     logging.error(f"删除过期文件失败 code={exp.code}: {e}")
                 try:

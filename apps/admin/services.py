@@ -1,6 +1,7 @@
 import os
 import time
 
+from core.logger import logger
 from core.response import APIResponse
 from core.storage import FileStorageInterface, storages
 from core.settings import settings
@@ -17,7 +18,14 @@ class FileService:
 
     async def delete_file(self, file_id: int):
         file_code = await FileCodes.get(id=file_id)
-        await self.file_storage.delete_file(file_code)
+        if file_code.uuid_file_name and file_code.file_path:
+            storage_type = file_code.storage_type or settings.file_storage
+            storage: FileStorageInterface = storages[storage_type]()
+            try:
+                await storage.delete_file(file_code)
+            except Exception as e:
+                logger.warning(f"storage delete failed for file {file_id} (storage={storage_type}): {e}")
+                raise HTTPException(status_code=500, detail=f"存储删除失败: {str(e)}")
         await file_code.delete()
 
     async def list_files(self, page: int, size: int, keyword: str = ""):
@@ -38,7 +46,9 @@ class FileService:
         if file_code.text:
             return APIResponse(detail=file_code.text)
         else:
-            return await self.file_storage.get_file_response(file_code)
+            storage_type = file_code.storage_type or settings.file_storage
+            storage: FileStorageInterface = storages[storage_type]()
+            return await storage.get_file_response(file_code)
 
     async def share_local_file(self, item):
         local_file = LocalFileClass(item.filename)
@@ -63,6 +73,7 @@ class FileService:
             expired_at=expired_at,
             expired_count=expired_count,
             used_count=used_count,
+            storage_type=settings.file_storage,
         )
 
         return {

@@ -28,6 +28,7 @@ class FileCodes(models.Model):
     file_hash = fields.CharField(max_length=64, null=True)
     is_chunked = fields.BooleanField(default=False)
     upload_id = fields.CharField(max_length=36, null=True)
+    storage_type = fields.CharField(max_length=20, default="local")
 
     async def is_expired(self):
         if self.expired_at is None:
@@ -37,7 +38,11 @@ class FileCodes(models.Model):
         return self.expired_count <= 0
 
     async def get_file_path(self):
-        return f"{self.file_path}/{self.uuid_file_name}"
+        if not self.uuid_file_name:
+            return f"{self.file_path or ''}"
+        from core.utils import sanitize_filename
+        safe_name = await sanitize_filename(self.uuid_file_name)
+        return f"{self.file_path}/{safe_name}"
 
 
 class UploadChunk(models.Model):
