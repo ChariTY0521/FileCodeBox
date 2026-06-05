@@ -68,13 +68,36 @@ Local storage writes to `data/` (`core/settings.py:data_root`). S3/OneDrive/Open
 
 ## Docker
 
-The Dockerfile is multi-stage:
-1. Stage 1 clones frontend repos from GitHub, **applies patches from `patches/frontend/src/`** over the 2024 theme source, then runs `npm install && npm run build` for both themes
-2. Stage 2 copies built themes into `themes/2024` and `themes/2023`
+### Build
 
-The `patches/frontend/src/` directory mirrors the frontend repo's `src/` structure. When modifying the 2024 theme UI, update files there and re-run the build. The Dockerfile `COPY patches/frontend/ /build/fronted-2024/src/` applies them before `npm run build`.
+Dockerfile 为**单阶段构建**（Python only），前端主题依赖本地预先构建好的 `themes/` 目录。原因：此网络环境下 Docker 容器内无法访问 GitHub（`git clone` 失败），且 `node:20-alpine` 的 npm 存在 bug（`Exit handler never called`）。
 
-Environment variables: `HOST` (default `0.0.0.0`), `PORT` (default `12345`), `WORKERS` (default `1`), `LOG_LEVEL` (default `info`). Docker Compose overrides `HOST` to `::` for IPv6 dual-stack.
+```bash
+# 构建镜像
+sudo docker build -t filecodebox:v1.0.0 .
+
+# 导出入tar.gz
+sudo docker save filecodebox:v1.0.0 | gzip > filecodebox.tar.gz
+```
+
+**构建前必须确保本地 `themes/` 已构建好**（见下方 Local Frontend Development）。`.dockerignore` 已排除 `themes/` → 如需打包本地主题，先注释掉该行。
+
+### 网络加速
+
+- **PyPI 镜像**: Dockerfile 中 `pip install` 使用了清华镜像 `-i https://pypi.tuna.tsinghua.edu.cn/simple`
+- **Docker Registry 镜像**: 如 Docker Hub 拉取慢，在 `/etc/docker/daemon.json` 中配置：
+  ```json
+  { "registry-mirrors": ["https://docker.1panel.live"] }
+  ```
+  然后 `sudo systemctl restart docker`
+
+### 已知问题
+
+- `node:20-alpine` 上 `npm install` 会报 `Exit handler never called!`（npm 10.x bug），必须用 Debian 系镜像或升级 npm 到 11+
+- `node:20-slim` 缺少 `ca-certificates`，git clone 需先 `apt-get install ca-certificates`
+- 容器内访问 GitHub 时 HTTP/2 可能报 `RPC failed; curl 16 Error in the HTTP2 framing layer`，需 `git config --global http.version HTTP/1.1`
+- 前端项目的 `package-lock.json` 可能锁死 bilibili 内部源（`nexus3.bilibili.co`），需 `rm -f package-lock.json` 后重新生成
+- 原多阶段 Dockerfile 可工作（前提：网络能直连 GitHub + 使用 `node:20` Debian 系 + 删 lockfile），当前因网络限制改用单阶段方案
 
 ## Local Frontend Development
 
@@ -97,7 +120,7 @@ Without `themes/` the app crashes at startup (`Directory './themes/2024/assets' 
 ## Gotchas
 
 - `data/` is gitignored and runtime-only; the DB and uploaded files live there. Must be volume-mounted in Docker.
-- `themes/` is gitignored — built only during Docker image creation or local dev. Without it, the app crashes.
+- `themes/` is gitignored — 使用单阶段 Dockerfile 时**必须先在本地构建**，否则应用启动崩溃。构建 Docker 镜像前确保 `.dockerignore` 中的 `themes/` 已注释掉。
 - The `themesSelect` setting value is like `"themes/2024"`, used as a filesystem path.
 - `models.py` uses `pydantic_model_creator` from Tortoise — these are auto-generated Pydantic schemas, not hand-written.
 - Config integer fields (`uploadSize`, `openUpload`, etc.) are cast to `int` in `ConfigService.update_config` — passing them as strings from the admin API is fine.
