@@ -65,7 +65,7 @@ async def file_delete(
     file_service: FileService = Depends(get_file_service),
 ):
     await file_service.delete_file(data.id)
-    return APIResponse()
+    return APIResponse(detail="删除成功")
 
 
 @admin_api.get("/file/list")

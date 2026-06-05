@@ -275,23 +275,31 @@ class S3FileStorage(FileStorageInterface):
         if not settings.s3_endpoint_url:
             self.endpoint_url = f"https://{self.s3_hostname}"
         else:
-            # 如果提供了 s3_endpoint_url，则优先使用它
             self.endpoint_url = settings.s3_endpoint_url
 
+    def _s3_config(self):
+        return Config(
+            signature_version=self.signature_version,
+            s3={"payload_signing_enabled": False},
+        )
+
     async def save_file(self, file: UploadFile, save_path: str):
+        content = await file.read()
+        await file.seek(0)
+        checksum = base64.b64encode(hashlib.sha256(content).digest()).decode()
         async with self.session.client(
                 "s3",
                 endpoint_url=self.endpoint_url,
                 aws_session_token=self.aws_session_token,
                 region_name=self.region_name,
-                config=Config(signature_version=self.signature_version),
+                config=self._s3_config(),
         ) as s3:
-            # 使用 upload_fileobj 流式上传，避免将整个文件加载到内存
-            await s3.upload_fileobj(
-                file.file,
-                self.bucket_name,
-                save_path,
-                ExtraArgs={"ContentType": file.content_type or "application/octet-stream"},
+            await s3.put_object(
+                Bucket=self.bucket_name,
+                Key=save_path,
+                Body=content,
+                ContentType=file.content_type or "application/octet-stream",
+                ChecksumSHA256=checksum,
             )
 
     async def delete_file(self, file_code: FileCodes):
@@ -299,7 +307,7 @@ class S3FileStorage(FileStorageInterface):
                 "s3",
                 endpoint_url=self.endpoint_url,
                 region_name=self.region_name,
-                config=Config(signature_version=self.signature_version),
+                config=self._s3_config(),
         ) as s3:
             await s3.delete_object(
                 Bucket=self.bucket_name, Key=await file_code.get_file_path()
@@ -314,7 +322,7 @@ class S3FileStorage(FileStorageInterface):
                     "s3",
                     endpoint_url=self.endpoint_url,
                     region_name=self.region_name,
-                    config=Config(signature_version=self.signature_version),
+                    config=self._s3_config(),
             ) as s3:
                 # 尝试获取文件大小（HEAD请求）
                 try:
@@ -388,7 +396,7 @@ class S3FileStorage(FileStorageInterface):
                     "s3",
                     endpoint_url=self.endpoint_url,
                     region_name=self.region_name,
-                    config=Config(signature_version=self.signature_version),
+                    config=self._s3_config(),
             ) as s3:
                 result = await s3.generate_presigned_url(
                     "get_object",
@@ -406,14 +414,14 @@ class S3FileStorage(FileStorageInterface):
         注意：这里不使用 S3 原生的 multipart upload，而是将每个分片作为独立对象存储
         """
         chunk_key = str(Path(save_path).parent / "chunks" / upload_id / f"{chunk_index}.part")
+        checksum = base64.b64encode(hashlib.sha256(chunk_data).digest()).decode()
         async with self.session.client(
             's3',
             endpoint_url=self.endpoint_url,
             aws_session_token=self.aws_session_token,
             region_name=self.region_name,
-            config=Config(signature_version=self.signature_version),
+            config=self._s3_config(),
         ) as s3:
-            # 将分片作为独立对象上传
             await s3.put_object(
                 Bucket=self.bucket_name,
                 Key=chunk_key,
@@ -421,7 +429,8 @@ class S3FileStorage(FileStorageInterface):
                 Metadata={
                     'chunk-hash': chunk_hash,
                     'chunk-index': str(chunk_index)
-                }
+                },
+                ChecksumSHA256=checksum,
             )
 
     async def merge_chunks(self, upload_id: str, chunk_info: UploadChunk, save_path: str) -> tuple[str, str]:
@@ -437,7 +446,7 @@ class S3FileStorage(FileStorageInterface):
             endpoint_url=self.endpoint_url,
             aws_session_token=self.aws_session_token,
             region_name=self.region_name,
-            config=Config(signature_version=self.signature_version),
+            config=self._s3_config(),
         ) as s3:
             # 创建 multipart upload
             mpu = await s3.create_multipart_upload(
@@ -472,12 +481,14 @@ class S3FileStorage(FileStorageInterface):
                     file_sha256.update(chunk_data)
 
                     # 上传分片到 multipart upload
+                    part_checksum = base64.b64encode(hashlib.sha256(chunk_data).digest()).decode()
                     part_response = await s3.upload_part(
                         Bucket=self.bucket_name,
                         Key=save_path,
                         UploadId=mpu_id,
                         PartNumber=i + 1,  # S3 part numbers start at 1
-                        Body=chunk_data
+                        Body=chunk_data,
+                        ChecksumSHA256=part_checksum,
                     )
                     parts.append({
                         'PartNumber': i + 1,
@@ -517,7 +528,7 @@ class S3FileStorage(FileStorageInterface):
             endpoint_url=self.endpoint_url,
             aws_session_token=self.aws_session_token,
             region_name=self.region_name,
-            config=Config(signature_version=self.signature_version),
+            config=self._s3_config(),
         ) as s3:
             try:
                 # 列出并删除所有分片对象
@@ -545,7 +556,7 @@ class S3FileStorage(FileStorageInterface):
             endpoint_url=self.endpoint_url,
             aws_session_token=self.aws_session_token,
             region_name=self.region_name,
-            config=Config(signature_version=self.signature_version),
+            config=self._s3_config(),
         ) as s3:
             return await s3.generate_presigned_url(
                 "put_object",
@@ -567,7 +578,7 @@ class S3FileStorage(FileStorageInterface):
             endpoint_url=self.endpoint_url,
             aws_session_token=self.aws_session_token,
             region_name=self.region_name,
-            config=Config(signature_version=self.signature_version),
+            config=self._s3_config(),
         ) as s3:
             try:
                 await s3.head_object(Bucket=self.bucket_name, Key=save_path)

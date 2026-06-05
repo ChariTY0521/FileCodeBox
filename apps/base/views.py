@@ -76,6 +76,7 @@ class FileUploadService:
             expired_at=expired_at,
             expired_count=expired_count,
             used_count=used_count,
+            storage_type=settings.file_storage,
             **extra_fields,
         )
         return code
@@ -122,6 +123,7 @@ async def share_text(
         used_count=used_count,
         size=len(text),
         prefix="Text",
+        storage_type=settings.file_storage,
     )
     ip_limit["upload"].add_ip(ip)
     return APIResponse(detail={"code": code})
@@ -153,6 +155,7 @@ async def share_file(
         expired_at=expired_at,
         expired_count=expired_count,
         used_count=used_count,
+        storage_type=settings.file_storage,
     )
     ip_limit["upload"].add_ip(ip)
     return APIResponse(detail={"code": code, "name": file.filename})
@@ -178,7 +181,6 @@ async def update_file_usage(file_code: FileCodes) -> None:
 
 @share_api.get("/select/")
 async def get_code_file(code: str, ip: str = Depends(ip_limit["error"])):
-    file_storage: FileStorageInterface = storages[settings.file_storage]()
     has, file_code = await get_code_file_by_code(code)
     if not has:
         ip_limit["error"].add_ip(ip)
@@ -186,12 +188,13 @@ async def get_code_file(code: str, ip: str = Depends(ip_limit["error"])):
 
     assert isinstance(file_code, FileCodes)
     await update_file_usage(file_code)
+    storage_type = file_code.storage_type or settings.file_storage
+    file_storage: FileStorageInterface = storages[storage_type]()
     return await file_storage.get_file_response(file_code)
 
 
 @share_api.post("/select/")
 async def select_file(data: SelectFileModel, ip: str = Depends(ip_limit["error"])):
-    file_storage: FileStorageInterface = storages[settings.file_storage]()
     has, file_code = await get_code_file_by_code(data.code)
     if not has:
         ip_limit["error"].add_ip(ip)
@@ -199,6 +202,8 @@ async def select_file(data: SelectFileModel, ip: str = Depends(ip_limit["error"]
 
     assert isinstance(file_code, FileCodes)
     await update_file_usage(file_code)
+    storage_type = file_code.storage_type or settings.file_storage
+    file_storage: FileStorageInterface = storages[storage_type]()
     return APIResponse(
         detail={
             "code": file_code.code,
@@ -215,7 +220,6 @@ async def select_file(data: SelectFileModel, ip: str = Depends(ip_limit["error"]
 
 @share_api.get("/download")
 async def download_file(key: str, code: str, ip: str = Depends(ip_limit["error"])):
-    file_storage: FileStorageInterface = storages[settings.file_storage]()
     if await get_select_token(code) != key:
         ip_limit["error"].add_ip(ip)
         raise HTTPException(status_code=403, detail="下载鉴权失败")
@@ -223,6 +227,8 @@ async def download_file(key: str, code: str, ip: str = Depends(ip_limit["error"]
     if not has:
         return APIResponse(code=404, detail="文件不存在")
     assert isinstance(file_code, FileCodes)
+    storage_type = file_code.storage_type or settings.file_storage
+    file_storage: FileStorageInterface = storages[storage_type]()
     return (
         APIResponse(detail=file_code.text)
         if file_code.text
@@ -498,6 +504,7 @@ async def complete_upload(
             uuid_file_name=f"{prefix}{suffix}",
             prefix=prefix,
             suffix=suffix,
+            storage_type=settings.file_storage,
         )
         # 清理临时文件
         await storage.clean_chunks(upload_id, save_path)
