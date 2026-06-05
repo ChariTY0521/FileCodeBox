@@ -368,6 +368,53 @@ npm install
 npm run dev
 ```
 
+### Docker 镜像构建
+
+如需从源码自行构建 Docker 镜像（而非使用 Docker Hub 预构建镜像）：
+
+**1. 构建前端主题**
+
+```bash
+# 克隆前端源码
+git clone --depth 1 https://github.com/vastsa/FileCodeBoxFronted.git /tmp/fronted-2024
+git clone --depth 1 https://github.com/vastsa/FileCodeBoxFronted2023.git /tmp/fronted-2023
+
+# 构建 2024 主题
+cd /tmp/fronted-2024
+npm install --legacy-peer-deps
+npm run build-only
+cp -r dist/* /path/to/FileCodeBox/themes/2024/
+
+# 构建 2023 主题
+cd /tmp/fronted-2023
+npm install --legacy-peer-deps
+npm run build-only
+cp -r dist/* /path/to/FileCodeBox/themes/2023/
+```
+
+**2. 修改 `.dockerignore`**，注释掉 `themes/` 行（单阶段构建需要打包本地主题）
+
+**3. 构建镜像**
+
+```bash
+cd /path/to/FileCodeBox
+docker build -t filecodebox:v1.0.0 .
+```
+
+**4. 导出镜像（用于分发）**
+
+```bash
+docker save filecodebox:v1.0.0 | gzip > filecodebox.tar.gz
+```
+
+**网络加速**：构建过程需安装 Python 依赖，国内环境建议使用 PyPI 镜像：
+```bash
+# Dockerfile 中已默认使用清华镜像，无需额外配置
+# 如果 Docker Hub 拉取基础镜像慢，可配置 registry mirror：
+# echo '{"registry-mirrors":["https://docker.1panel.live"]}' > /etc/docker/daemon.json
+# systemctl restart docker
+```
+
 ### 技术栈
 
 | 类别 | 技术 |
